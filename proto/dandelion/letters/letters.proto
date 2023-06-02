@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package dandelion.letters;
+
+option go_package = "github.com/chronos-tachyon/dandelion/letters";
+
+import "dandelion/core.proto";
+
+message EstablishLink {
+  bytes seed = 1;
+  repeated dandelion.Address addresses = 2;
+}
+
+message RetireLink {
+}
+
+message ForwardEnvelope {
+  dandelion.SealedEnvelope envelope = 1;
+}

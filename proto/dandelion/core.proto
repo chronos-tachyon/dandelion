@@ -1,0 +1,202 @@
+syntax = "proto3";
+
+package dandelion;
+
+option go_package = "github.com/chronos-tachyon/dandelion/core";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+// Identity is the minimal information needed to identify a specific entity on
+// the Dandelion mesh network.
+//
+// Entities may rotate their keys via SignedAttestation messages, so they are
+// expected to have multiple identities over time.  Entities may also construct
+// limited-use pseudonymous identities as desired, but such pseudonyms do not
+// receive the benefit of any existing trust relationships that the entity may
+// have, and message routing to pseudonyms through the mesh will tend to be
+// slower and lossier.
+//
+message Identity {
+  // SignPublicKey is the entity's public key for use with libsodium's
+  // crypto_sign.  It is an Ed25519 public key, which is 32 bytes long.
+  bytes sign_public_key = 1;
+
+  // BoxPublicKey is the entity's public key for use with libsodium's
+  // crypto_box_seal.  It is an X25519 public key, which is 32 bytes long.
+  bytes box_public_key = 2;
+}
+
+// SealedEnvelope is the basic unit of node-to-node communication over the Dandelion
+// mesh network.
+message SealedEnvelope {
+  // Recipient is the envelope's intended recipient.
+  Identity recipient = 1;
+
+  // Contents is a libsodium "sealed box" which contains a single
+  // dandelion.Envelope protobuf message in binary serialization format.  The
+  // public key used to seal the box is Recipient.BoxPublicKey.
+  bytes contents = 2;
+}
+
+// Envelope is a collection of SignedLetter and SignedAttestation messages.
+// Envelope messages are most commonly found sealed inside of SealedEnvelope
+// messages.
+message Envelope {
+  message Item {
+    oneof payload {
+      // Padding may be safely ignored by the recipient.
+      //
+      // Padding bytes are primarily used to obscure how much information is
+      // actually contained in a SealedEnvelope, thwarting traffic analysis.
+      //
+      // Padding bytes may also be used to obscure the offset at which the
+      // other items begin or end, thwarting known plaintext attacks in the
+      // case that the other items in the envelope are somewhat predictable in
+      // byte offset and content.  (No such attacks are known for the specific
+      // algorithm used by libsodium's "sealed box" feature, assuming that
+      // nonces are never used twice.  However, the fact that such attacks are
+      // not known today does not mean they will never exist in the future, and
+      // the sufficiently paranoid will wish to consider this.)
+      //
+      bytes padding = 1;
+
+      // Letter holds a letter being delivered to the recipient.
+      SignedLetter letter = 2;
+
+      // Attestation holds an additional attestation which might be relevant to the recipient.
+      SignedAttestation attestation = 3;
+    }
+  }
+
+  // Items holds any number of Item messages.  The order is not meaningful.
+  repeated Item items = 1;
+}
+
+// SignedLetter is a Letter message with an attached signature.
+message SignedLetter {
+  // Sender is the Letter's sender.
+  Identity sender = 1;
+
+  // Signature is the libsodium signature resulting from calling
+  // crypto_sign_detached using the sender's private key on the byte string
+  // created by concatenating the following pieces:
+  //
+  //   * the ASCII string "dandelion-letter-v1"
+  //   * the byte 0xff
+  //   * Recipient.SignPublicKey (from SealedEnvelope or context)
+  //   * Recipient.BoxPublicKey (from SealedEnvelope or context)
+  //   * Sender.SignPublicKey
+  //   * Sender.BoxPublicKey
+  //   * Contents
+  //
+  bytes signature = 2;
+
+  // Contents is a single dandelion.Letter protobuf message in binary
+  // serialization format.
+  bytes contents = 3;
+}
+
+// Letter is a message from a specific sender to a specific recipient, found
+// inside of a SignedLetter.
+message Letter {
+  // Parts holds the protobuf messages being sent as the body of this letter.
+  //
+  // Most body parts live in the "dandelion.letters" package.  However, other
+  // protobuf messages may be sent as letter bodies, so long as both ends agree
+  // on the semantics of a given protobuf message when used as a letter body.
+  //
+  repeated google.protobuf.Any parts = 1;
+
+  // SentAt holds the time at which this letter was sent.
+  google.protobuf.Timestamp sent_at = 2;
+}
+
+// SignedAttestation is an Attestation message with an attached signature.
+message SignedAttestation {
+  // Attestor is the entity making this attestation.
+  Identity attestor = 1;
+
+  // Signature is the libsodium signature resulting from calling
+  // crypto_sign_detached using the attestor's private key on the byte string
+  // created by concatenating the following pieces:
+  //
+  //   * the ASCII string "dandelion-attestation-v1"
+  //   * the byte 0xff
+  //   * Attestor.SignPublicKey
+  //   * Attestor.BoxPublicKey
+  //   * Contents
+  //
+  bytes signature = 2;
+
+  // Contents is a single dandelion.Attestation protobuf message in binary
+  // serialization format.
+  bytes contents = 3;
+}
+
+// Attestation is a sworn statement by an attestor that certain facts were
+// known or believed to be true at the time of the attestation.
+//
+// Attestations are meant to be forwarded through the mesh network as needed,
+// whereas Letters are meant to reach a specific recipient.
+//
+message Attestation {
+  enum Privacy {
+    // EYES_ONLY indicates the attestor's desire that only the recipients
+    // chosen by the attestor may see it, and that no such recipient should
+    // forward it any further.
+    EYES_ONLY = 0;
+
+    // AS_NEEDED indicates the attestor's desire to keep the attestation
+    // private to a small group.  The intended small group is normally inferred
+    // from the context of which entity made the attestation.
+    AS_NEEDED = 1;
+
+    // UNLISTED indicates the attestor's permission to share the attestation
+    // with any entity that is already "in the know" in some sense.  For
+    // example, if the attestor is a node and the attestation is an UNLISTED
+    // share of the node's public IP address and port, then anyone who already
+    // knows the node's public key has permission to see the full attestation.
+    UNLISTED = 2;
+
+    // PUBLISHED indicates that everything in the attestation is public
+    // knowledge, and it may be freely shared with anyone who is curious about
+    // such things.  (Even search engines.)
+    PUBLISHED = 3;
+  }
+
+  // Claims holds the specific claims being made in this attestation.
+  //
+  // Most claims live in the "dandelion.claims" package.  However, other
+  // protobuf messages may be sent as claims, so long as both ends agree on the
+  // semantics of a given protobuf message when used as a claim.
+  //
+  // An attestation may contain an arbitrary number of claims, but attestors
+  // should put unrelated claims in separate SignedAttestation messages so that
+  // verifiers can share them independently.
+  //
+  repeated google.protobuf.Any claims = 1;
+
+  // AttestedAt indicates the time at which the attestation was made.
+  google.protobuf.Timestamp attested_at = 2;
+
+  // SerialNumber indicates the serial number of the attestation.  It must be
+  // non-zero, and the attestor must ensure that all serial numbers made with
+  // the same Identity are monotonically increasing within the epoch defined by
+  // that Identity's lifespan.
+  uint64 serial_number = 3;
+
+  // Privacy expresses the attestor's wishes for privacy of this attestation.
+  Privacy privacy = 4;
+}
+
+message InternetAddress {
+  bytes ip = 1;
+  uint32 port = 2;
+}
+
+message Address {
+  oneof address {
+    InternetAddress internet = 1;
+  }
+}

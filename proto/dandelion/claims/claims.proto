@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package dandelion.claims;
+
+option go_package = "github.com/chronos-tachyon/dandelion/claims";
+
+import "dandelion/core.proto";
+
+message Confirmed {
+  dandelion.SignedAttestation inner = 1;
+}
+
+message Disputed {
+  dandelion.SignedAttestation inner = 1;
+}
+
+message MemberOf {
+  dandelion.Identity group_entity = 1;
+}
+
+message FormerlyKnownAs {
+  dandelion.Identity former_identity = 1;
+}
+
+message Retired {
+  enum Reason {
+    MANUAL_ROTATION = 0;
+    SCHEDULED_ROTATION = 1;
+    POSSIBLE_COMPROMISE = 2;
+    KNOWN_COMPROMISE = 3;
+  }
+  Reason reason = 1;
+}

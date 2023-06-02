@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package dandelion;
+
+option go_package = "github.com/chronos-tachyon/dandelion/core";
+
+message KeyRing {
+  message Secret {
+    uint64 id = 1;
+    bytes raw = 2;
+  }
+
+  repeated Secret list = 1;
+}
